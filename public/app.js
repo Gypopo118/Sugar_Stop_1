@@ -29,17 +29,27 @@ function getSettings() { return LS.get("settings", defaultSettings); }
 function setSettings(s) { LS.set("settings", s); }
 
 /* ---------- Client-side API keys (stored solely on device in localStorage) ---------- */
+// Чистит типичный мусор при копипасте: слово Bearer, кавычки, пробелы/переносы внутри, trailing slash.
+// Ваш 401 с хвостом ****dev/ — классика: в конец затесался "/" или кусок URL.
+function sanitizeApiKey(raw) {
+  let k = String(raw || "").trim()
+    .replace(/^bearer\s+/i, "")
+    .replace(/^["'`\u00AB\u00BB\u201E\u201C\u201D]+|["'`\u00AB\u00BB\u201E\u201C\u201D]+$/g, "")
+    .replace(/\s+/g, "")
+    .replace(/\/+$/, "");
+  return k;
+}
 function getApiKeys() {
   return LS.get("apiKeys", { deepseek: "", gemini: "" });
 }
 function setApiKey(provider, key) {
   const keys = getApiKeys();
-  keys[provider] = (key || "").trim();
+  keys[provider] = sanitizeApiKey(key);
   LS.set("apiKeys", keys);
 }
 function getApiKey(provider) {
   const keys = getApiKeys();
-  return (keys[provider] || "").trim();
+  return sanitizeApiKey(keys[provider] || "");
 }
 
 /* ---------- Tab navigation ---------- */
@@ -483,18 +493,28 @@ providerSegment.addEventListener("click", (e) => {
 });
 
 document.getElementById("btnSaveKey").addEventListener("click", () => {
-  const key = customApiKey.value.trim();
+  const key = sanitizeApiKey(customApiKey.value);
   if (!key) {
     keyStatus.textContent = "Пожалуйста, вставьте или введите API-ключ.";
     keyStatus.style.color = "#D9534F";
     return;
   }
   const provider = getSettings().provider;
+  // Подсказка формата, но не блок: ключ всё равно сохраняем после чистки.
+  if (provider === "deepseek" && !key.startsWith("sk-")) {
+    keyStatus.textContent = "Похоже, это не DeepSeek-ключ: ключ DeepSeek начинается с sk-. Сохраняю как есть, но проверьте, что вставили ключ с platform.deepseek.com/api_keys, а не URL или ключ Gemini.";
+    keyStatus.style.color = "#D9534F";
+  } else if (provider === "gemini" && key.startsWith("sk-")) {
+    keyStatus.textContent = "Похоже, это ключ DeepSeek (sk-...), а выбран провайдер Gemini. Переключите провайдера на DeepSeek Vision или вставьте ключ Google (AIza...). Сохраняю как есть.";
+    keyStatus.style.color = "#D9534F";
+  }
   setApiKey(provider, key);
   customApiKey.value = "";
-  keyStatus.textContent = `Ключ для ${PROVIDER_LABELS[provider]} сохранён на этом устройстве!`;
-  keyStatus.style.color = "var(--teal)";
-  setTimeout(loadSettingsIntoForm, 1000);
+  if (keyStatus.style.color !== "rgb(217, 83, 79)" && keyStatus.style.color !== "#D9534F") {
+    keyStatus.textContent = `Ключ для ${PROVIDER_LABELS[provider]} сохранён на этом устройстве!`;
+    keyStatus.style.color = "var(--teal)";
+  }
+  setTimeout(loadSettingsIntoForm, 1500);
 });
 
 document.getElementById("btnClearKey").addEventListener("click", () => {

@@ -26,8 +26,10 @@ export async function onRequestPost({ request }) {
     return jsonError("Image is too large", 413);
   }
 
-  // Strictly require client-supplied API key — no server fallback
-  const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+  // Strictly require client-supplied API key — no server fallback.
+  // Санитизируем тут тоже: в localStorage мог остаться ключ со старым мусором (пробелы, Bearer, trailing slash).
+  let apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+  apiKey = apiKey.replace(/^bearer\s+/i, "").replace(/\s+/g, "").replace(/\/+$/, "");
   if (!apiKey || apiKey.length < 8) {
     return jsonError(`Не указан API-ключ для ${provider.label}. Пожалуйста, укажите ваш API-ключ в Настройках приложения.`, 401);
   }
@@ -59,6 +61,8 @@ async function callDeepSeek({ apiKey, systemPrompt, imageBase64, refineText, xeS
   // Канонический endpoint без /v1; /v1 — лишь алиас и иногда глючит на vision-exp.
   // response_format убран намеренно: на experimental vision он часто даёт пустой content.
   // Вместо этого требуем JSON в промпте и чистим fences в safeParseJson.
+  // finish_reason:length лечится большим max_tokens + отключенным thinking:
+  // reasoning-токены иначе съедают бюджет и JSON обрезается.
   const res = await withTimeout((signal) => fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
@@ -69,7 +73,9 @@ async function callDeepSeek({ apiKey, systemPrompt, imageBase64, refineText, xeS
         { role: "user", content }
       ],
       temperature: 0.1,
-      max_tokens: 2000
+      max_tokens: 8000,
+      stream: false,
+      thinking: { type: "disabled" }
     }),
     signal
   }), "DeepSeek");
@@ -83,10 +89,18 @@ async function callDeepSeek({ apiKey, systemPrompt, imageBase64, refineText, xeS
     : Array.isArray(msg?.content)
       ? msg.content.map((p) => (typeof p?.text === "string" ? p.text : "")).join("")
       : "";
+  const finishReason = data?.choices?.[0]?.finish_reason || "";
   if (!raw || !raw.trim()) {
-    const reason = data?.choices?.[0]?.finish_reason ? ` (finish_reason: ${data.choices[0].finish_reason})` : "";
+    if (finishReason === "length") {
+      throw fail(`DeepSeek обрезал ответ (finish_reason: length): не хватило max_tokens. Попробуйте ещё раз — лимит уже увеличен до 8000, обычно хватает. Если повторится — упростите фото (меньше блюд в кадре) или добавьте текстовое уточнение.`, 502);
+    }
+    const reason = finishReason ? ` (finish_reason: ${finishReason})` : "";
     const refusal = msg?.refusal ? `: ${String(msg.refusal).slice(0, 200)}` : "";
     throw fail(`DeepSeek returned an empty response${reason}${refusal}`);
+  }
+  // Ответ есть, но обрезан по лимиту — JSON будет битый, лучше честно попросить повторить.
+  if (finishReason === "length") {
+    throw fail(`DeepSeek вернул обрезанный ответ (finish_reason: length). Попробуйте ещё раз или упростите кадр.`, 502);
   }
   return normalizeDishes(safeParseJson(raw, "DeepSeek"), xeSize);
 }
@@ -142,6 +156,15 @@ async function withTimeout(fn, providerLabel, ms = 45000) {
 
 async function providerError(label, res) {
   const text = await res.text().catch(() => "");
+  if (res.status === 401) {
+    return fail(`${label}: неверный API-ключ (401). Откройте Настройки → удалите ключ → зайдите на platform.deepseek.com/api_keys → создайте новый ключ (начинается с sk-) → вставьте без пробелов и без слова Bearer.`, 401);
+  }
+  if (res.status === 402) {
+    return fail(`${label}: недостаточно баланса (402). Ключ верный, но деньги закончились — пополните на platform.deepseek.com.`, 402);
+  }
+  if (res.status === 404) {
+    return fail(`${label} error 404: неверный endpoint или model. Проверьте URL и имя модели.`, 404);
+  }
   return fail(`${label} error ${res.status}: ${text.slice(0, 300)}`);
 }
 
