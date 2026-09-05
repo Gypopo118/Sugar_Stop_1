@@ -122,7 +122,7 @@ function setPhoto(dataUrl) {
   frameHint.hidden = true;
   stopCamera();
   btnAnalyze.disabled = false;
-  btnAnalyze.textContent = "Посчитать углеводы";
+  btnAnalyze.textContent = "Анализировать";
   setTimeout(() => {
     btnAnalyze.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, 100);
@@ -162,8 +162,21 @@ fileInput.addEventListener("change", () => {
 // some contexts, so also allow tapping the shutter to trigger the permission prompt.
 startCamera();
 
-/* ---------- Voice input for the refine field ---------- */
+/* ---------- Refine field: single-line start, autogrow, 500 chars counter ---------- */
 const refineText = document.getElementById("refineText");
+const refineCount = document.getElementById("refineCount");
+function autoGrowRefine() {
+  if (!refineText) return;
+  refineText.style.height = "auto";
+  refineText.style.height = Math.min(refineText.scrollHeight, 120) + "px";
+  if (refineCount) refineCount.textContent = `${refineText.value.length} / 500`;
+}
+if (refineText) {
+  refineText.addEventListener("input", autoGrowRefine);
+  autoGrowRefine();
+}
+
+/* ---------- Voice input for the refine field ---------- */
 const btnMic = document.getElementById("btnMic");
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognizer = null;
@@ -173,7 +186,8 @@ if (SpeechRecognition) {
   recognizer.interimResults = false;
   recognizer.onresult = (e) => {
     const text = e.results[0][0].transcript;
-    refineText.value = refineText.value ? refineText.value + " " + text : text;
+    refineText.value = (refineText.value ? refineText.value + " " + text : text).slice(0, 500);
+    autoGrowRefine();
   };
   recognizer.onend = () => btnMic.classList.remove("listening");
 } else {
@@ -205,7 +219,7 @@ btnAnalyze.addEventListener("click", async () => {
   }
 
   btnAnalyze.disabled = true;
-  btnAnalyze.textContent = "Считаю...";
+  btnAnalyze.textContent = "Анализирую...";
 
   try {
     const res = await fetch("/api/analyze", {
@@ -235,7 +249,7 @@ btnAnalyze.addEventListener("click", async () => {
     analyzeError.hidden = false;
   } finally {
     btnAnalyze.disabled = false;
-    btnAnalyze.textContent = "Посчитать углеводы";
+    btnAnalyze.textContent = "Анализировать";
   }
 });
 
@@ -338,8 +352,9 @@ document.getElementById("btnDiscard").addEventListener("click", () => {
   shotPreview.hidden = true;
   frameHint.hidden = false;
   btnAnalyze.disabled = true;
-  btnAnalyze.textContent = "Сделайте фото, чтобы посчитать";
+  btnAnalyze.textContent = "Сделайте фото для анализа";
   refineText.value = "";
+  autoGrowRefine();
   showView("capture");
   startCamera();
 });
