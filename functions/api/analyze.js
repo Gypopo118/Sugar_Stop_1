@@ -8,6 +8,10 @@ const PROVIDERS = {
   gemini: {
     label: "Gemini",
     call: callGemini
+  },
+  custom: {
+    label: "Свой провайдер",
+    call: callCustom
   }
 };
 
@@ -39,7 +43,7 @@ export async function onRequestPost({ request }) {
 
   let dishes;
   try {
-    dishes = await provider.call({ apiKey, systemPrompt, imageBase64, refineText, xeSize });
+    dishes = await provider.call({ apiKey, systemPrompt, imageBase64, refineText, xeSize, custom: body.custom });
   } catch (e) {
     return jsonError(e.message, e.status || 502);
   }
@@ -103,6 +107,81 @@ async function callDeepSeek({ apiKey, systemPrompt, imageBase64, refineText, xeS
     throw fail(`DeepSeek вернул обрезанный ответ (finish_reason: length). Попробуйте ещё раз или упростите кадр.`, 502);
   }
   return normalizeDishes(safeParseJson(raw, "DeepSeek"), xeSize);
+}
+
+/* ---------- Custom (OpenAI-совместимый, данные полностью от пользователя) ---------- */
+async function callCustom({ apiKey, systemPrompt, imageBase64, refineText, xeSize, custom }) {
+  const cfg = {
+    name: typeof custom?.name === "string" ? custom.name.slice(0, 40) : "",
+    baseUrl: typeof custom?.baseUrl === "string" ? custom.baseUrl.trim().replace(/\s+/g, "") : "",
+    model: typeof custom?.model === "string" ? custom.model.trim().replace(/\s+/g, "") : ""
+  };
+  const label = cfg.name || "Свой провайдер";
+  if (!cfg.model || cfg.model.length > 200) throw fail(`${label}: не указан Model ID (1–200 символов). Заполните его в Настройках.`);
+  const urlErr = validateCustomUrl(cfg.baseUrl);
+  if (urlErr) throw fail(`${label}: ${urlErr}`);
+
+  const content = [
+    { type: "text", text: buildInstruction(refineText) },
+    { type: "image_url", image_url: { url: imageBase64 } }
+  ];
+  // Чужим API шлём только стандартные поля: model/messages/temperature/max_tokens.
+  // Никаких thinking/response_format — это вендор-специфика DeepSeek.
+  const res = await withTimeout((signal) => fetch(cfg.baseUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      stream: false
+    }),
+    signal
+  }), label);
+
+  if (!res.ok) {
+    if (res.status === 401) throw fail(`${label}: неверный API-ключ (401). Проверьте ключ в Настройках.`, 401);
+    if (res.status === 402) throw fail(`${label}: недостаточно баланса/квоты (402).`, 402);
+    if (res.status === 404) throw fail(`${label}: endpoint или model не найдены (404). Проверьте URL и Model ID — URL должен вести до .../chat/completions.`, 404);
+    const text = await res.text().catch(() => "");
+    throw fail(`${label} error ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const msg = data?.choices?.[0]?.message;
+  const raw = typeof msg?.content === "string"
+    ? msg.content
+    : Array.isArray(msg?.content)
+      ? msg.content.map((p) => (typeof p?.text === "string" ? p.text : "")).join("")
+      : "";
+  const finishReason = data?.choices?.[0]?.finish_reason || "";
+  if (!raw || !raw.trim()) {
+    if (finishReason === "length") throw fail(`${label} обрезал ответ (length): уменьшите кадр или добавьте текстовое уточнение.`, 502);
+    throw fail(`${label} вернул пустой ответ${finishReason ? ` (finish_reason: ${finishReason})` : ""}. Возможно, модель не vision — выберите vision-модель провайдера.`, 502);
+  }
+  if (finishReason === "length") throw fail(`${label} вернул обрезанный ответ (length). Попробуйте ещё раз или упростите кадр.`, 502);
+  return normalizeDishes(safeParseJson(raw, label), xeSize);
+}
+
+function validateCustomUrl(raw) {
+  if (!raw) return "не указан Endpoint. Вставьте полный https-URL до .../chat/completions.";
+  if (/\s/.test(raw)) return "в Endpoint есть пробелы — вставьте URL без пробелов.";
+  let u;
+  try { u = new URL(raw); } catch { return "Endpoint не похож на URL. Пример: https://openrouter.ai/api/v1/chat/completions."; }
+  if (u.protocol !== "https:") return "Endpoint должен начинаться с https:// (http запрещён).";
+  if (u.username || u.password) return "Endpoint не должен содержать логин/пароль в URL.";
+  const host = u.hostname.toLowerCase();
+  // SSRF-защита: блокируем локальные и внутренние адреса — ключ ушёл бы не туда.
+  if (host === "localhost" || host.endsWith(".localhost")) return "localhost запрещён.";
+  if (/^(127\.|0\.0\.0\.0|::1|\[::1\])/.test(host)) return "локальные адреса запрещены.";
+  if (/^(10\.|192\.168\.|169\.254\.)/.test(host)) return "внутренние адреса запрещены.";
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return "внутренние адреса запрещены.";
+  if (/metadata\.google|metadata\.azure|instance-data|rancher|kubernetes\.default/i.test(host)) return "cloud metadata-хосты запрещены.";
+  if (raw.length > 300) return "Endpoint слишком длинный (макс. 300 символов).";
+  return null;
 }
 
 /* ---------- Gemini ---------- */

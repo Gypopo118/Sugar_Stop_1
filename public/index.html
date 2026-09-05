@@ -142,7 +142,23 @@
     <div class="segmented" id="providerSegment">
       <button data-value="deepseek">DeepSeek Vision</button>
       <button data-value="gemini">Gemini 3.7 Flash</button>
+      <button data-value="custom">Свой</button>
     </div>
+  </section>
+
+  <section class="settings-group" id="customProviderGroup" hidden>
+    <h2>Свой провайдер (OpenAI-совместимый)</h2>
+    <p class="settings-hint">Для любого API с форматом OpenAI Chat Completions: OpenRouter, Together, Groq, Nebius, свой сервер. Работают только модели с пониманием картинок (vision).</p>
+    <label>Название (только для отображения)
+      <input type="text" id="customName" maxlength="40" placeholder="Мой провайдер" autocomplete="off">
+    </label>
+    <label>Endpoint — полный URL до chat completions (https)
+      <input type="url" id="customBaseUrl" maxlength="300" placeholder="https://openrouter.ai/api/v1/chat/completions" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </label>
+    <label>Model ID — точное имя модели у провайдера
+      <input type="text" id="customModel" maxlength="200" placeholder="qwen/qwen2.5-vl-72b-instruct" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </label>
+    <p class="settings-hint">Ключ вводится ниже в общем поле «API ключ» — он хранится отдельно для каждого провайдера на этом устройстве.</p>
   </section>
 
   <section class="settings-group">

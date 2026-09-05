@@ -40,7 +40,28 @@ function sanitizeApiKey(raw) {
   return k;
 }
 function getApiKeys() {
-  return LS.get("apiKeys", { deepseek: "", gemini: "" });
+  const v = LS.get("apiKeys", { deepseek: "", gemini: "" });
+  if (typeof v.custom !== "string") v.custom = "";
+  return v;
+}
+/* ---------- Свой провайдер (только OpenAI-совместимые) ---------- */
+function getCustomProvider() {
+  const v = LS.get("customProvider", {});
+  return {
+    name: typeof v.name === "string" ? v.name.slice(0, 40) : "",
+    baseUrl: typeof v.baseUrl === "string" ? v.baseUrl.trim().replace(/\s+/g, "").replace(/\/+$/, "") : "",
+    model: typeof v.model === "string" ? v.model.trim().replace(/\s+/g, "") : ""
+  };
+}
+function setCustomProvider(patch) {
+  const cur = getCustomProvider();
+  const next = {
+    name: typeof patch.name === "string" ? patch.name.slice(0, 40) : cur.name,
+    baseUrl: typeof patch.baseUrl === "string" ? patch.baseUrl.trim().replace(/\s+/g, "").replace(/\/+$/, "").slice(0, 300) : cur.baseUrl,
+    model: typeof patch.model === "string" ? patch.model.trim().replace(/\s+/g, "").slice(0, 200) : cur.model
+  };
+  LS.set("customProvider", next);
+  return next;
 }
 function setApiKey(provider, key) {
   const keys = getApiKeys();
@@ -207,9 +228,20 @@ btnAnalyze.addEventListener("click", async () => {
 
   const settings = getSettings();
   const apiKey = getApiKey(settings.provider);
+  let custom = null;
+  if (settings.provider === "custom") {
+    custom = getCustomProvider();
+    if (!custom.baseUrl || !custom.baseUrl.toLowerCase().startsWith("https://") || !custom.model) {
+      analyzeError.innerHTML = `Для своего провайдера заполните Endpoint (https) и Model ID.<br><button id="btnGoToSettings" class="btn-secondary" style="margin-top:10px; width:100%;" type="button">Перейти в Настройки</button>`;
+      analyzeError.hidden = false;
+      document.getElementById("btnGoToSettings")?.addEventListener("click", () => showView("settings"));
+      return;
+    }
+  }
 
   if (!apiKey) {
-    analyzeError.innerHTML = `Для расчёта с помощью <strong>${PROVIDER_LABELS[settings.provider]}</strong> необходимо указать API-ключ.<br><button id="btnGoToSettings" class="btn-secondary" style="margin-top:10px; width:100%;" type="button">Перейти в Настройки и указать ключ</button>`;
+    const lbl = settings.provider === "custom" ? (getCustomProvider().name || "Свой провайдер") : PROVIDER_LABELS[settings.provider];
+    analyzeError.innerHTML = `Для расчёта с помощью <strong>${lbl}</strong> необходимо указать API-ключ.<br><button id="btnGoToSettings" class="btn-secondary" style="margin-top:10px; width:100%;" type="button">Перейти в Настройки и указать ключ</button>`;
     analyzeError.hidden = false;
     document.getElementById("btnGoToSettings")?.addEventListener("click", () => {
       showView("settings");
@@ -228,8 +260,9 @@ btnAnalyze.addEventListener("click", async () => {
       body: JSON.stringify({
         apiKey,
         provider: settings.provider,
+        custom,
         imageBase64: currentPhotoDataUrl,
-        refineText: refineText.value.trim(),
+        refineText: refineText.value.trim().slice(0, 500),
         xeGrams: settings.xeGrams,
         hand: {
           palmWidthCm: settings.palmWidth,
@@ -455,13 +488,22 @@ const fistThickness = document.getElementById("fistThickness");
 const customApiKey = document.getElementById("customApiKey");
 const keyStatus = document.getElementById("keyStatus");
 
-const PROVIDER_LABELS = { deepseek: "DeepSeek", gemini: "Gemini 3.7 Flash" };
+const PROVIDER_LABELS = { deepseek: "DeepSeek", gemini: "Gemini 3.7 Flash", custom: "Свой" };
 
 function loadSettingsIntoForm() {
   const s = getSettings();
   [...xeSegment.children].forEach(btn => btn.classList.toggle("active", Number(btn.dataset.value) === s.xeGrams));
   [...providerSegment.children].forEach(btn => btn.classList.toggle("active", btn.dataset.value === s.provider));
-  keyProviderLabel.textContent = PROVIDER_LABELS[s.provider];
+  const cp = getCustomProvider();
+  const customGroup = document.getElementById("customProviderGroup");
+  if (customGroup) customGroup.hidden = s.provider !== "custom";
+  const nameInput = document.getElementById("customName");
+  const urlInput = document.getElementById("customBaseUrl");
+  const modelInput = document.getElementById("customModel");
+  if (nameInput && document.activeElement !== nameInput) nameInput.value = cp.name || "";
+  if (urlInput && document.activeElement !== urlInput) urlInput.value = cp.baseUrl || "";
+  if (modelInput && document.activeElement !== modelInput) modelInput.value = cp.model || "";
+  keyProviderLabel.textContent = s.provider === "custom" ? (cp.name || "Свой провайдер") : (PROVIDER_LABELS[s.provider] || s.provider);
   if (s.palmWidth) palmWidth.value = s.palmWidth;
   if (s.palmLength) palmLength.value = s.palmLength;
   if (s.fistThickness) fistThickness.value = s.fistThickness;
@@ -473,9 +515,10 @@ function loadSettingsIntoForm() {
     keyStatus.style.color = "var(--teal)";
     customApiKey.placeholder = "Ключ задан. Введите новый для замены";
   } else {
-    keyStatus.textContent = `Ключ для ${PROVIDER_LABELS[s.provider]} не задан. Вставьте ключ.`;
+    const lbl = s.provider === "custom" ? (getCustomProvider().name || "Свой провайдер") : PROVIDER_LABELS[s.provider];
+    keyStatus.textContent = `Ключ для ${lbl} не задан. Вставьте ключ.`;
     keyStatus.style.color = "#D9534F";
-    customApiKey.placeholder = s.provider === "deepseek" ? "sk-..." : "AIzaSy...";
+    customApiKey.placeholder = s.provider === "deepseek" ? "sk-..." : s.provider === "gemini" ? "AIzaSy..." : "ключ провайдера";
   }
 }
 
@@ -516,7 +559,11 @@ document.getElementById("btnSaveKey").addEventListener("click", () => {
   }
   const provider = getSettings().provider;
   // Подсказка формата, но не блок: ключ всё равно сохраняем после чистки.
-  if (provider === "deepseek" && !key.startsWith("sk-")) {
+  // Для custom формат неизвестен — без проверок.
+  if (provider === "custom") {
+    keyStatus.textContent = "";
+    keyStatus.style.color = "var(--ink-soft)";
+  } else if (provider === "deepseek" && !key.startsWith("sk-")) {
     keyStatus.textContent = "Похоже, это не DeepSeek-ключ: ключ DeepSeek начинается с sk-. Сохраняю как есть, но проверьте, что вставили ключ с platform.deepseek.com/api_keys, а не URL или ключ Gemini.";
     keyStatus.style.color = "#D9534F";
   } else if (provider === "gemini" && key.startsWith("sk-")) {
@@ -530,6 +577,14 @@ document.getElementById("btnSaveKey").addEventListener("click", () => {
     keyStatus.style.color = "var(--teal)";
   }
   setTimeout(loadSettingsIntoForm, 1500);
+});
+
+["customName", "customBaseUrl", "customModel"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("change", (e) => {
+    const map = { customName: "name", customBaseUrl: "baseUrl", customModel: "model" };
+    setCustomProvider({ [map[id]]: e.target.value });
+    loadSettingsIntoForm();
+  });
 });
 
 document.getElementById("btnClearKey").addEventListener("click", () => {

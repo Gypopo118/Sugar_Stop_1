@@ -36,7 +36,7 @@ button, input, textarea {
   top: 0;
   z-index: 5;
   padding: calc(var(--safe-top) + 6px) 16px 8px;
-  background: var(--bg) radial-gradient(circle at 20% 0%, rgba(255,255,255,.7), transparent 55%), var(--bg);
+  background: var(--bg);
   box-shadow: 0 2px 10px rgba(60,40,20,.06);
   display: flex;
   align-items: baseline;
@@ -350,7 +350,9 @@ button, input, textarea {
   margin-bottom: 10px;
 }
 .settings-group input[type=number],
-.settings-group input[type=password] {
+.settings-group input[type=password],
+.settings-group input[type=text],
+.settings-group input[type=url] {
   display: block;
   width: 100%;
   margin-top: 4px;
