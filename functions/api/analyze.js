@@ -49,12 +49,17 @@ export async function onRequestPost({ request }) {
 
 /* ---------- DeepSeek ---------- */
 async function callDeepSeek({ apiKey, systemPrompt, imageBase64, refineText, xeSize }) {
+  // Текст первым, картинка второй — как в официальных примерах DeepSeek Vision.
+  // detail:high важен для оценки размера порций по фото.
   const content = [
-    { type: "image_url", image_url: { url: imageBase64 } },
-    { type: "text", text: buildInstruction(refineText) }
+    { type: "text", text: buildInstruction(refineText) },
+    { type: "image_url", image_url: { url: imageBase64, detail: "high" } }
   ];
 
-  const res = await withTimeout((signal) => fetch("https://api.deepseek.com/v1/chat/completions", {
+  // Канонический endpoint без /v1; /v1 — лишь алиас и иногда глючит на vision-exp.
+  // response_format убран намеренно: на experimental vision он часто даёт пустой content.
+  // Вместо этого требуем JSON в промпте и чистим fences в safeParseJson.
+  const res = await withTimeout((signal) => fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -63,17 +68,26 @@ async function callDeepSeek({ apiKey, systemPrompt, imageBase64, refineText, xeS
         { role: "system", content: systemPrompt },
         { role: "user", content }
       ],
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      max_tokens: 1200
+      temperature: 0.1,
+      max_tokens: 2000
     }),
     signal
   }), "DeepSeek");
 
   if (!res.ok) throw await providerError("DeepSeek", res);
   const data = await res.json();
-  const raw = data?.choices?.[0]?.message?.content;
-  if (!raw) throw fail("DeepSeek returned an empty response");
+  const msg = data?.choices?.[0]?.message;
+  // content может прийти строкой или массивом партoв — нормализуем оба варианта.
+  const raw = typeof msg?.content === "string"
+    ? msg.content
+    : Array.isArray(msg?.content)
+      ? msg.content.map((p) => (typeof p?.text === "string" ? p.text : "")).join("")
+      : "";
+  if (!raw || !raw.trim()) {
+    const reason = data?.choices?.[0]?.finish_reason ? ` (finish_reason: ${data.choices[0].finish_reason})` : "";
+    const refusal = msg?.refusal ? `: ${String(msg.refusal).slice(0, 200)}` : "";
+    throw fail(`DeepSeek returned an empty response${reason}${refusal}`);
+  }
   return normalizeDishes(safeParseJson(raw, "DeepSeek"), xeSize);
 }
 
@@ -138,8 +152,19 @@ function fail(message, status = 502) {
 }
 
 function safeParseJson(raw, label) {
-  try { return JSON.parse(raw); }
-  catch { throw fail(`Could not parse ${label}'s JSON output`); }
+  // experimental vision часто оборачивает JSON в ```json fences — чистим.
+  const cleaned = String(raw || "").trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/, "")
+    .trim();
+  try { return JSON.parse(cleaned); }
+  catch {
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { return JSON.parse(m[0]); } catch { /* fallthrough */ }
+    }
+    throw fail(`Could not parse ${label}'s JSON output`);
+  }
 }
 
 function buildSystemPrompt(xeSize, hand) {
@@ -151,24 +176,29 @@ function buildSystemPrompt(xeSize, hand) {
     ? `На фото рядом с тарелкой может быть рука пользователя — используй её как масштабную линейку. Параметры руки пользователя: ${handLines.join(", ")}.`
     : `На фото рядом с тарелкой может быть рука — если она есть, используй её как приблизительную масштабную линейку (средняя ширина ладони взрослого человека ~8-9 см).`;
 
-  return `Ты — ассистент для больного сахарным диабетом 1 типа, который оценивает состав тарелки по фотографии.
+  return `Ты — ассистент по фитнес-питанию, который оценивает состав тарелки по фотографии.
+Пользователь стремится к фитнес-диете: достаточный белок, контроль калорий, снижение гликемического индекса (ГИ) и гликемической нагрузки (ГН), стабильная энергия без скачков сахара.
 Твоя задача — определить блюда на фото и их вес, а затем посчитать пищевую ценность.
 ${handBlock}
 Один ХЕ (хлебная единица) = ${xeSize} г усвояемых углеводов.
 Если рука не видна или её не за что зацепить — оценивай размер порции по посуде (стандартная тарелка ~24-26 см) и типичным порциям, и снижай уверенность оценки, но всё равно верни числа.
-Отвечай ТОЛЬКО валидным JSON, без пояснений, без markdown, в формате:
+Приоритет фитнес-цели: точнее выделяй белковые продукты, гарниры и жиры отдельно; ГИ указывай уверенно для узнаваемых продуктов, иначе null; явно разделяй тарелку на компоненты, а не одной строкой.
+Отвечай ТОЛЬКО валидным JSON без пояснений, без markdown, без fences, в формате:
 {"dishes":[{"name":"строка","weightG":число,"carbsG":число,"xe":число,"gi":число или null,"kcal":число,"proteinG":число,"fatG":число}]}
-Округляй разумно. ГИ (гликемический индекс) указывай, если можешь опознать блюдо с достаточной уверенностью; если нет — null. Раздели тарелку на отдельные блюда/компоненты, а не одну общую строку, если это возможно различить.`;
+Округляй разумно.`;
 }
 
 function buildInstruction(refineText) {
-  return refineText && refineText.trim()
+  const base = refineText && refineText.trim()
     ? `Пользователь уточнил состав и вес текстом — это ПРИОРИТЕТНЕЕ того, что видно на фото, используй именно эти данные там, где они заданы, и фото только для того, чего в уточнении нет: "${refineText.trim()}"`
     : "Пользователь не оставил текстового уточнения — определи блюда и вес по фото и руке-эталону.";
+  // Дублируем требование JSON в user-блоке: vision-exp лучше слушается user, чем system.
+  return `${base} Верни ТОЛЬКО JSON без markdown и без пояснений.`;
 }
 
 function normalizeDishes(parsed, xeSize) {
-  const dishes = parsed?.dishes;
+  // Модель иногда возвращает массив напрямую вместо {dishes:[...]} — принимаем оба.
+  const dishes = Array.isArray(parsed) ? parsed : parsed?.dishes;
   if (!Array.isArray(dishes)) return [];
   return dishes.slice(0, 12).map((d) => {
     const carbsG = numOr(d.carbsG, 0);
