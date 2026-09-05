@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>SugarStop — учёт углеводов</title>
+<meta name="theme-color" content="#F7F8F6">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="167x167" href="/icons/apple-touch-icon-167.png">
+<link rel="apple-touch-icon" sizes="152x152" href="/icons/apple-touch-icon-152.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="SugarStop">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <span class="brand">ХЕ</span>
+  <span class="brand-sub">углеводы по фото</span>
+</header>
+
+<main id="view-capture" class="view">
+  <section class="capture-card">
+    <div class="frame" id="frame">
+      <video id="camStream" playsinline autoplay muted hidden></video>
+      <img id="shotPreview" hidden alt="Фото тарелки">
+      <div class="frame-hint" id="frameHint">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.6"/></svg>
+        <p>Тарелка + рядом ладонь для масштаба</p>
+      </div>
+    </div>
+
+    <div class="capture-controls">
+      <button id="btnCamera" class="btn-shutter" aria-label="Сделать фото"></button>
+      <label class="btn-secondary" for="fileInput">Из галереи</label>
+      <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+    </div>
+  </section>
+
+  <section class="refine">
+    <label for="refineText">Уточнение (необязательно, приоритетнее фото)</label>
+    <div class="refine-row">
+      <textarea id="refineText" rows="2" placeholder="например: гречка 150г, котлета 100г"></textarea>
+      <button id="btnMic" class="btn-mic" aria-label="Голосовой ввод" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" stroke="currentColor" stroke-width="1.6"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <button id="btnAnalyze" class="btn-primary" disabled>Сделайте фото, чтобы посчитать</button>
+  <p id="analyzeError" class="error-text" hidden></p>
+</main>
+
+<main id="view-result" class="view" hidden>
+  <section class="totals">
+    <div class="totals-photo">
+      <img id="resultPhoto" alt="Фото приёма пищи">
+    </div>
+    <div class="totals-numbers">
+      <div class="total-block">
+        <span class="total-value" id="totalXE">0</span>
+        <span class="total-label">ХЕ</span>
+      </div>
+      <div class="total-block secondary">
+        <span class="total-value" id="totalCarbs">0</span>
+        <span class="total-label">г углеводов</span>
+      </div>
+    </div>
+    <div class="totals-grid">
+      <div><span id="totalKcal">0</span><small>ккал</small></div>
+      <div><span id="totalProtein">0</span><small>белки, г</small></div>
+      <div><span id="totalFat">0</span><small>жиры, г</small></div>
+      <div><span id="totalGI">—</span><small>ГИ (взвеш.)</small></div>
+      <div><span id="totalGL">—</span><small>ГН</small></div>
+    </div>
+  </section>
+
+  <p class="disclaimer">Оценка ориентировочная. Сверяйте с глюкометром перед дозированием инсулина.</p>
+
+  <section id="dishList" class="dish-list"></section>
+
+  <div class="result-actions">
+    <button id="btnAddDish" class="btn-secondary full">+ Добавить блюдо вручную</button>
+    <button id="btnSaveMeal" class="btn-primary full">Сохранить в дневник</button>
+    <button id="btnDiscard" class="btn-ghost full">Отменить, переснять</button>
+  </div>
+</main>
+
+<main id="view-diary" class="view" hidden>
+  <div class="diary-nav">
+    <button id="diaryPrev" aria-label="Предыдущий день">‹</button>
+    <span id="diaryDate">Сегодня</span>
+    <button id="diaryNext" aria-label="Следующий день">›</button>
+  </div>
+  <div class="diary-total">
+    <span id="diaryDayXE">0</span> ХЕ за день
+    <small id="diaryDayCarbs">0 г углеводов · 0 ккал</small>
+  </div>
+  <div id="diaryEntries" class="diary-entries"></div>
+  <p id="diaryEmpty" class="empty-state" hidden>Записей пока нет. Сфотографируйте первый приём пищи.</p>
+</main>
+
+<main id="view-settings" class="view" hidden>
+  <section class="settings-group">
+    <h2>Размер 1 ХЕ</h2>
+    <div class="segmented" id="xeGramSegment">
+      <button data-value="10">10 г (РФ)</button>
+      <button data-value="12">12 г (EU)</button>
+      <button data-value="15">15 г (США)</button>
+    </div>
+  </section>
+
+  <section class="settings-group">
+    <h2>Эталон — ваша рука</h2>
+    <p class="settings-hint">Эти параметры передаются модели, чтобы точнее оценивать размер порции по фото.</p>
+    <label>Ширина ладони (см)
+      <input type="number" id="palmWidth" step="0.1" min="5" max="15" placeholder="8.5">
+    </label>
+    <label>Длина ладони, от запястья до кончиков пальцев (см)
+      <input type="number" id="palmLength" step="0.1" min="10" max="25" placeholder="17.5">
+    </label>
+    <label>Толщина кулака / горсть (см)
+      <input type="number" id="fistThickness" step="0.1" min="3" max="10" placeholder="6">
+    </label>
+  </section>
+
+  <section class="settings-group">
+    <h2>Модель для распознавания фото</h2>
+    <div class="segmented" id="providerSegment">
+      <button data-value="deepseek">DeepSeek Vision</button>
+      <button data-value="gemini">Gemini 3.7 Flash</button>
+    </div>
+  </section>
+
+  <section class="settings-group">
+    <h2>API ключ — <span id="keyProviderLabel">DeepSeek</span></h2>
+    <p class="settings-hint">Ключ сохраняется только в памяти вашего смартфона (в локальном хранилище браузера) и используется для запросов к выбранной модели.</p>
+    <input type="password" id="customApiKey" placeholder="sk-...">
+    <div class="settings-key-row">
+      <button id="btnSaveKey" class="btn-secondary" type="button">Сохранить ключ</button>
+      <button id="btnClearKey" class="btn-ghost" type="button">Удалить</button>
+    </div>
+    <p id="keyStatus" class="settings-hint"></p>
+  </section>
+
+  <p class="version-tag">MVP · только еда и ХЕ, без расчёта дозы инсулина</p>
+</main>
+
+<!-- Нижняя панель с кнопкой «Установить на рабочий стол» (скрыта в PWA standalone) -->
+<div id="installAppBanner" class="install-app-banner" hidden>
+  <div class="install-app-content">
+    <img src="/icons/icon-96.png" class="install-app-icon" alt="SugarStop">
+    <div class="install-app-text">
+      <strong>SugarStop</strong>
+      <span>Быстрый доступ с экрана</span>
+    </div>
+  </div>
+  <div class="install-app-actions">
+    <button id="btnInstallApp" class="btn-install-app" type="button">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      <span>Установить на рабочий стол</span>
+    </button>
+    <button id="btnInstallAppClose" class="btn-install-close" aria-label="Скрыть" type="button">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Модальная инструкция по установке для iOS Safari -->
+<div id="iosInstallModal" class="ios-install-modal" hidden>
+  <div class="ios-install-backdrop" id="iosInstallBackdrop"></div>
+  <div class="ios-install-sheet">
+    <div class="ios-install-handle"></div>
+    <div class="ios-install-header">
+      <img src="/icons/apple-touch-icon.png" class="ios-install-app-icon" alt="SugarStop">
+      <div>
+        <h3>Установка SugarStop</h3>
+        <p>Ярлык на экран «Домой»</p>
+      </div>
+    </div>
+    <ol class="ios-install-steps">
+      <li>
+        <span class="step-num">1</span>
+        <span>Нажмите кнопку <strong>«Поделиться»</strong> <svg class="ios-inline-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3v12M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> внизу экрана Safari</span>
+      </li>
+      <li>
+        <span class="step-num">2</span>
+        <span>В меню выберите <strong>«На экран «Домой»»</strong> <svg class="ios-inline-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="4" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+      </li>
+      <li>
+        <span class="step-num">3</span>
+        <span>В правом верхнем углу нажмите <strong>«Добавить»</strong></span>
+      </li>
+    </ol>
+    <button id="btnIosInstallClose" class="btn-primary full" type="button">Понятно</button>
+  </div>
+</div>
+
+<nav class="tabbar">
+  <button class="tab active" data-tab="capture">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="3.6" stroke="currentColor" stroke-width="1.6"/></svg>
+    <span>Съесть</span>
+  </button>
+  <button class="tab" data-tab="diary">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.6"/><path d="M9 12h6M9 16h6M9 8h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <span>Дневник</span>
+  </button>
+  <button class="tab" data-tab="settings">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/><path d="M12 3v2.2M12 18.8V21M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M3 12h2.2M18.8 12H21M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <span>Настройки</span>
+  </button>
+</nav>
+
+<template id="dishCardTemplate">
+  <article class="dish-card">
+    <div class="dish-main">
+      <input class="dish-name" type="text" value="">
+      <div class="dish-weight-row">
+        <input class="dish-weight" type="number" min="0" step="1"><span>г</span>
+      </div>
+    </div>
+    <div class="dish-figures">
+      <div><input class="dish-xe" type="number" min="0" step="0.1"><small>ХЕ</small></div>
+      <div><input class="dish-carbs" type="number" min="0" step="1"><small>углев., г</small></div>
+      <div><span class="dish-gi">—</span><small>ГИ</small></div>
+    </div>
+    <button class="dish-remove" aria-label="Удалить блюдо">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </article>
+</template>
+
+<script src="/app.js"></script>
+</body>
+</html>
