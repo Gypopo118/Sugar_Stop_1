@@ -86,11 +86,21 @@ button, input, textarea {
 }
 .frame-hint p { margin: 0; font-size: 14px; line-height: 1.4; }
 
+.frame-subhint {
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--ink-soft);
+  margin: 6px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .capture-controls {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 .btn-photo {
   height: 58px;
