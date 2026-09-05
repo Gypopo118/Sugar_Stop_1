@@ -113,6 +113,9 @@ function setPhoto(dataUrl) {
   stopCamera();
   btnAnalyze.disabled = false;
   btnAnalyze.textContent = "Посчитать углеводы";
+  setTimeout(() => {
+    btnAnalyze.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, 100);
 }
 
 btnCamera.addEventListener("click", () => {
@@ -517,108 +520,134 @@ function initPwaInstall() {
   if (!banner || !btnInstall) return;
 
   function isStandaloneMode() {
-    return (
-      window.matchMedia("(display-mode: standalone)").matches ||
+    return Boolean(
+      (window.matchMedia && (
+        window.matchMedia("(display-mode: standalone)").matches ||
+        window.matchMedia("(display-mode: fullscreen)").matches ||
+        window.matchMedia("(display-mode: minimal-ui)").matches
+      )) ||
       window.navigator.standalone === true ||
       document.referrer.includes("android-app://") ||
-      new URLSearchParams(window.location.search).get("source") === "pwa"
+      new URLSearchParams(window.location.search).get("source") === "pwa" ||
+      LS.get("pwaInstalled", false) === true
     );
   }
 
-  // If running from desktop/homescreen shortcut directly in standalone mode, DO NOT show
-  if (isStandaloneMode()) {
+  function hideBanner(dismissPermanently = false) {
     banner.hidden = true;
-    return;
+    banner.style.setProperty("display", "none", "important");
+    if (dismissPermanently) {
+      LS.set("pwaInstallDismissed", true);
+    }
+  }
+
+  function showBanner() {
+    if (isStandaloneMode() || LS.get("pwaInstallDismissed", false) === true) {
+      hideBanner(false);
+      return;
+    }
+    banner.hidden = false;
+    banner.style.removeProperty("display");
+  }
+
+  // If already standalone or user closed it previously: hide immediately
+  if (isStandaloneMode() || LS.get("pwaInstallDismissed", false) === true) {
+    hideBanner(false);
   }
 
   let deferredPrompt = null;
   const ua = window.navigator.userAgent;
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes("Macintosh") && "ontouchend" in document);
 
-  // Check if temporarily dismissed in current session
-  const isSessionDismissed = sessionStorage.getItem("pwaInstallDismissed") === "true";
-
-  function showBanner() {
-    if (isStandaloneMode() || isSessionDismissed) return;
-    banner.hidden = false;
-  }
-
-  function hideBanner(persistSession = true) {
-    banner.hidden = true;
-    if (persistSession) {
-      sessionStorage.setItem("pwaInstallDismissed", "true");
-    }
-  }
-
   // Android & Chromium browsers: capture install prompt
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e;
-    showBanner();
+    if (!isStandaloneMode() && LS.get("pwaInstallDismissed", false) !== true) {
+      showBanner();
+    }
   });
 
   // When app is successfully installed: permanently hide
   window.addEventListener("appinstalled", () => {
     deferredPrompt = null;
+    LS.set("pwaInstalled", true);
     hideBanner(true);
-    if (iosModal) iosModal.hidden = true;
+    if (iosModal) {
+      iosModal.hidden = true;
+      iosModal.style.setProperty("display", "none", "important");
+    }
   });
 
   // Handle display mode changes dynamically
   if (window.matchMedia) {
-    window.matchMedia("(display-mode: standalone)").addEventListener("change", (e) => {
-      if (e.matches) hideBanner(true);
+    ["standalone", "fullscreen", "minimal-ui"].forEach((mode) => {
+      window.matchMedia(`(display-mode: ${mode})`).addEventListener("change", (e) => {
+        if (e.matches) {
+          LS.set("pwaInstalled", true);
+          hideBanner(true);
+        }
+      });
     });
   }
 
   // Click on "Установить на рабочий стол"
   btnInstall.addEventListener("click", async () => {
     if (deferredPrompt) {
-      // Android / Chromium native install prompt
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === "accepted") {
+        LS.set("pwaInstalled", true);
         hideBanner(true);
       }
       deferredPrompt = null;
     } else if (isIOS) {
-      // iOS: open bottom sheet with Safari Add to Home Screen instructions
-      if (iosModal) iosModal.hidden = false;
-    } else {
-      // Fallback for other browsers (e.g. desktop or non-Chromium Android)
       if (iosModal) {
         iosModal.hidden = false;
+        iosModal.style.removeProperty("display");
+      }
+    } else {
+      if (iosModal) {
+        iosModal.hidden = false;
+        iosModal.style.removeProperty("display");
       } else {
         alert("Чтобы установить приложение, откройте меню браузера (⋮) и выберите «Установить» или «Добавить на главный экран».");
       }
     }
   });
 
-  // Close button on install banner
+  // Close button on install banner: handle both click and touch
   if (btnClose) {
-    btnClose.addEventListener("click", () => {
+    const handleClose = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
       hideBanner(true);
-    });
+    };
+    btnClose.addEventListener("click", handleClose);
+    btnClose.addEventListener("touchend", handleClose);
   }
 
   // Close iOS guidance modal
   if (btnIosClose) {
     btnIosClose.addEventListener("click", () => {
-      if (iosModal) iosModal.hidden = true;
+      if (iosModal) {
+        iosModal.hidden = true;
+        iosModal.style.setProperty("display", "none", "important");
+      }
     });
   }
   if (iosBackdrop) {
     iosBackdrop.addEventListener("click", () => {
-      if (iosModal) iosModal.hidden = true;
+      if (iosModal) {
+        iosModal.hidden = true;
+        iosModal.style.setProperty("display", "none", "important");
+      }
     });
   }
 
-  // Initial check: if mobile browser (iOS or Android), show banner
+  // Initial check for mobile browser
   const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
-  if (isMobile && !isStandaloneMode() && !isSessionDismissed) {
-    setTimeout(() => {
-      if (!isStandaloneMode()) showBanner();
-    }, 800);
+  if (isMobile && !isStandaloneMode() && LS.get("pwaInstallDismissed", false) !== true) {
+    setTimeout(showBanner, 600);
   }
 }
 initPwaInstall();

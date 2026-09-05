@@ -42,8 +42,8 @@ button, input, textarea {
   gap: 8px;
   border-bottom: 1px solid var(--line);
 }
-.brand { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
-.brand-sub { font-size: 13px; color: var(--ink-soft); }
+.brand { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); }
+.brand-sub { font-size: 13px; color: var(--ink-soft); font-weight: 400; }
 
 .view {
   padding: 16px 16px calc(96px + var(--safe-bottom));
@@ -364,6 +364,12 @@ button, input, textarea {
 .version-tag { text-align: center; font-size: 12px; color: var(--ink-soft); margin-top: 20px; }
 
 /* ---------- PWA install banner & button ---------- */
+[hidden],
+.install-app-banner[hidden],
+.ios-install-modal[hidden] {
+  display: none !important;
+}
+
 .install-app-banner {
   position: fixed;
   left: 12px;
@@ -455,24 +461,26 @@ button, input, textarea {
 
 .btn-install-close {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
   border: none;
-  background: rgba(255, 255, 255, 0.12);
-  color: #C9D3D0;
-  width: 28px;
-  height: 28px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #FFFFFF;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s;
+  z-index: 10;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, transform 0.1s;
 }
 
 .btn-install-close:active {
-  background: rgba(255, 255, 255, 0.25);
-  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0.92);
 }
 
 /* ---------- iOS Install Guidance Modal ---------- */
